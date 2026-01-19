@@ -1,1 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgroAI | Smart Weather-Aware Crop Advisor</title>
 
+<style>
+:root { --primary:#00ff88; --bg:#0b0f14; --glass:rgba(22,27,34,.9); }
+body{margin:0;font-family:system-ui;background:var(--bg);color:#fff;overflow:hidden}
+.viewport{width:100vw;height:100vh;background:#000;position:relative}
+video{width:100%;height:100%;object-fit:cover}
+.hud{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);width:90%;max-width:420px}
+.glass-panel{
+background:var(--glass);
+backdrop-filter:blur(25px);
+padding:22px;
+border-radius:28px;
+border:1px solid rgba(255,255,255,.1);
+box-shadow:0 20px 50px rgba(0,0,0,.8);
+text-align:center}
+.status-dot{width:8px;height:8px;background:var(--primary);border-radius:50%;display:inline-block;margin-right:8px;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+#soil-output{font-size:2rem;font-weight:900;margin:10px 0;color:var(--primary);text-transform:uppercase}
+.crop-container{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
+.crop-badge{border:1px solid var(--primary);color:var(--primary);padding:6px 14px;border-radius:12px;font-size:.8rem;font-weight:700;cursor:pointer}
+button{margin-top:10px;padding:10px 18px;border-radius:20px;border:none;font-weight:800;cursor:pointer}
+.lock-btn{background:var(--primary);color:#000}
+.locked{background:#ff5555;color:white}
+canvas{display:none}
+</style>
+</head>
+
+<body>
+
+<div class="viewport">
+<video id="camera" autoplay playsinline></video>
+
+<div class="hud">
+<div class="glass-panel">
+<div style="font-size:.7rem;letter-spacing:2px;color:#8b949e">
+<span class="status-dot"></span> LIVE AI ANALYSIS
+</div>
+
+<h1 id="soil-output">Scanning...</h1>
+<div id="crop-output" class="crop-container"></div>
+
+<button id="lockBtn" class="lock-btn">LOCK SOIL</button>
+</div>
+</div>
+</div>
+
+<canvas id="snapshot" width="416" height="416"></canvas>
+
+<script>
+/* ================= CONFIG ================= */
+const API_KEY = "0dcf74ef30f1f604d72214090768535f"; // OpenWeatherMap API key
+const RF_KEY = "CxxhkxfjWLeZydDtSjFd"; // Roboflow key
+const WORKFLOW_URL = "https://serverless.roboflow.com/amithesh-yppof/workflows/custom-workflow";
+
+/* ================= STATE ================= */
+let locked=false, lastSoil=null, lat=null, lon=null;
+
+/* ================= CROPS ================= */
+const seasonalCrops = {
+summer:{
+laterite:["Cashew","Coffee","Soybean","Vegetables"],
+red:["Maize","Groundnut","Cotton","Sunflower"],
+black:["Cotton","Sunflower","Soybean"],
+alluvial:["Rice","Sugarcane","Maize"],
+arid:["Bajra","Millets","Sorghum"],
+mountain:["Potato","Tomato","Apple"]
+},
+monsoon:{
+laterite:["Rice","Tea","Cashew"],
+red:["Cotton","Millets","Maize"],
+black:["Soybean","Cotton"],
+alluvial:["Rice","Jute","Sugarcane"],
+arid:["Millets","Bajra"],
+mountain:["Barley","Apple","Potato"]
+},
+winter:{
+laterite:["Vegetables","Tea","Coffee"],
+red:["Wheat","Gram","Mustard"],
+black:["Wheat","Soybean"],
+alluvial:["Wheat","Mustard","Jute"],
+arid:["Mustard","Bajra"],
+mountain:["Apple","Barley","Potato"]
+}
+};
+
+/* ================= SOIL NORMALIZATION ================= */
+function normalizeSoil(soil){
+    if(!soil) return null;
+    soil = soil.toLowerCase().trim().replace(/[\s\-_]/g,''); // remove spaces, hyphens, underscores
+    const soilMap = {
+        "laterite": "laterite",
+        "lateritic": "laterite",
+        "red": "red",
+        "redsoil": "red",
+        "alluvial": "alluvial",
+        "alluvialsoil": "alluvial",
+        "black": "black",
+        "blacksoil": "black",
+        "arid": "arid",
+        "aridsoil": "arid",
+        "mountain": "mountain",
+        "mountainsoil": "mountain"
+    };
+    return soilMap[soil] || null;
+}
+
+/* ================= SOIL DISPLAY NAMES ================= */
+const soilDisplayNames = {
+    laterite: "Laterite Soil",
+    red: "Red Soil",
+    alluvial: "Alluvial Soil",
+    black: "Black Soil",
+    arid: "Arid Soil",
+    mountain: "Mountain Soil"
+};
+
+/* ================= ELEMENTS ================= */
+const video=document.getElementById("camera");
+const canvas=document.getElementById("snapshot");
+const soilLabel=document.getElementById("soil-output");
+const cropContainer=document.getElementById("crop-output");
+const lockBtn=document.getElementById("lockBtn");
+
+/* ================= CAMERA ================= */
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(s=>{video.srcObject=s;setInterval(analyzeFrame,900);});
+
+/* ================= AI ================= */
+async function analyzeFrame(){
+if(locked) return;
+const ctx=canvas.getContext("2d");
+ctx.drawImage(video,0,0,416,416);
+const img=canvas.toDataURL("image/jpeg",0.45).split(",")[1];
+
+try{
+const r=await fetch(WORKFLOW_URL,{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({api_key:RF_KEY,inputs:{image:{type:"base64",value:img}}})
+});
+const d=await r.json();
+let rawSoil = extractSoil(d);
+let soil = normalizeSoil(rawSoil);
+if(soil){
+    lastSoil = soil;
+    soilLabel.innerText = soilDisplayNames[soil] || soil; // Friendly name
+    showPlaceholder();
+}else{
+    soilLabel.innerText="Unknown Soil";
+    cropContainer.innerHTML="";
+}
+}catch{}
+}
+
+function extractSoil(d){
+try{
+const o=d.outputs?.[0];
+for(const k in o){
+if(o[k]?.predictions?.length){
+return o[k].predictions[0].class;
+}
+}
+}catch{}
+return null;
+}
+
+/* ================= LOCK ================= */
+lockBtn.onclick=()=>{
+locked=!locked;
+lockBtn.classList.toggle("locked",locked);
+lockBtn.innerText=locked?"UNLOCK SOIL":"LOCK SOIL";
+};
+
+/* ================= SEASON ================= */
+function getSeason(){
+const m=new Date().getMonth()+1;
+if(m>=3 && m<=6) return "summer";
+if(m>=7 && m<=10) return "monsoon";
+return "winter";
+}
+
+/* ================= LOCATION ================= */
+function getLocation(){
+return new Promise((resolve,reject)=>{
+if(!navigator.geolocation) reject("No GPS");
+navigator.geolocation.getCurrentPosition(pos=>{
+lat=pos.coords.latitude;
+lon=pos.coords.longitude;
+resolve({lat,lon});
+},err=>reject(err));
+});
+}
+
+/* ================= WEATHER ================= */
+async function getWeather(){
+if(lat===null || lon===null) return null;
+try{
+const url=`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${API_KEY}`;
+const r=await fetch(url);
+const d=await r.json();
+return {temp:d.main.temp,rain:d.rain?.["1h"]||0};
+}catch{return null;}
+}
+
+/* ================= SHOW PLACEHOLDER ================= */
+function showPlaceholder(){
+cropContainer.innerHTML = "";
+const placeholder = document.createElement("span");
+placeholder.className = "crop-badge";
+placeholder.innerText = "SEE RECOMMENDED CROPS";
+placeholder.onclick = recommendCrops; // Clickable
+cropContainer.appendChild(placeholder);
+}
+
+/* ================= RECOMMEND LOGIC ================= */
+async function recommendCrops(){
+cropContainer.innerHTML="";
+soilLabel.innerText="Analyzing season and weather...";
+
+try{
+await getLocation();
+const weather=await getWeather();
+
+setTimeout(()=>{
+const season=getSeason();
+
+// Only use valid crops from mapping
+let baseCrops = [];
+if(lastSoil && seasonalCrops[season] && seasonalCrops[season][lastSoil]){
+    baseCrops = [...seasonalCrops[season][lastSoil]].filter(Boolean);
+}
+
+if(baseCrops.length===0){
+    soilLabel.innerText="No crops available";
+    cropContainer.innerHTML="";
+    return;
+}
+
+let crops = [...baseCrops];
+
+// Weather tweaks
+if(weather){
+    if(weather.rain<5 && lastSoil==="arid") crops.push("Drought-resistant millet");
+    if(weather.rain>20 && lastSoil==="alluvial") crops.push("Rice (high rainfall)");
+    if(weather.temp>35) crops.push("Heat-tolerant crop");
+    if(weather.temp<15) crops.push("Cold-tolerant crop");
+}
+
+// Ensure at least 2 crops
+while(crops.length<2){
+    if(baseCrops.length>0){
+        crops.push(baseCrops[Math.floor(Math.random()*baseCrops.length)]);
+    } else {
+        break;
+    }
+}
+
+// Shuffle & limit 5 crops
+crops = crops.sort(()=>0.5-Math.random()).slice(0,5);
+
+// Display only valid crops
+soilLabel.innerText=`${getSeason().toUpperCase()} CROPS`;
+cropContainer.innerHTML="";
+crops.forEach(c=>{
+    if(c){
+        const span=document.createElement("span");
+        span.className="crop-badge";
+        span.innerText=c;
+        cropContainer.appendChild(span);
+    }
+});
+
+},1200);
+
+}catch(e){
+soilLabel.innerText="Weather unavailable";
+cropContainer.innerHTML="";
+}
+}
+</script>
+
+</body>
+</html>
