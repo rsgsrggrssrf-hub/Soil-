@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Soil Sense</title>
+
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #1b5e20;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            z-index: 2;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        p {
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+        }
+
+        button {
+            font-size: 1.5rem;
+            padding: 18px 50px;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            background-color: #a5d6a7;
+            color: #1b5e20;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #c8e6c9;
+        }
+
+        /* Floating particles */
+        .particle {
+            position: absolute;
+            bottom: -10px;
+            width: 6px;
+            height: 6px;
+            background-color: rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            animation: floatUp linear infinite;
+        }
+
+        @keyframes floatUp {
+            from {
+                transform: translateY(0);
+            }
+            to {
+                transform: translateY(-110vh);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>🌱 Soil Sense</h1>
+        <p>Smart soil analysis for a sustainable future</p>
+
+        <button onclick="startProject()">START</button>
+    </div>
+
+    <script>
+        // Redirect to index.html
+        function startProject() {
+            window.location.href = "index.html";
+        }
+
+        // Create animated background particles
+        for (let i = 0; i < 40; i++) {
+            let particle = document.createElement("div");
+            particle.className = "particle";
+
+            particle.style.left = Math.random() * 100 + "vw";
+            particle.style.animationDuration = (5 + Math.random() * 5) + "s";
+            particle.style.animationDelay = Math.random() * 5 + "s";
+
+            document.body.appendChild(particle);
+        }
+    </script>
+
+</body>
+</html>
